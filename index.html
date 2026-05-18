@@ -99,6 +99,25 @@
   .loghead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
   .stat { color: var(--dim); font-size: 12px; }
   .err { color: var(--bad); }
+
+  /* Dropbox card */
+  .dbx-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .dbx-token-wrap { display:flex; gap:8px; width:100%; }
+  #dbxToken {
+    flex:1; background:#21262d; color:var(--text);
+    border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; font:inherit; min-width:0;
+  }
+  #dbxToken:focus { outline:none; border-color:var(--accent); }
+  .badge {
+    display:inline-block; padding:2px 8px; border-radius:4px;
+    font-size:11px; font-weight:600; letter-spacing:.04em;
+  }
+  .badge.ok  { background:#0d2818; color:var(--good); border:1px solid var(--good); }
+  .badge.off { background:#1e1a0e; color:var(--dim);  border:1px solid var(--line); }
+  .dbx-path { color:var(--dim); font-size:12px; margin-top:6px; word-break:break-all; }
+  .dbx-path a { color:var(--accent); text-decoration:none; }
+  .dbx-path a:hover { text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -151,6 +170,38 @@
       <button data-c="hammer-ons / pull-offs test">hammer-ons</button>
       <button data-c="fast run test">fast run</button>
       <button data-c="low E / A string test">low strings</button>
+    </div>
+  </div>
+
+  <!-- Dropbox integration -->
+  <div class="card" id="dropboxCard">
+    <div class="dbx-row" style="margin-bottom:10px;">
+      <span style="font-weight:600;font-size:13px;">Dropbox</span>
+      <span id="dbxBadge" class="badge off">disconnected</span>
+      <span id="dbxAccountName" style="color:var(--dim);font-size:12px;"></span>
+    </div>
+
+    <div id="dbxSetupArea">
+      <div class="dbx-token-wrap">
+        <input id="dbxToken" type="password" autocomplete="off"
+               placeholder="Paste a Dropbox access token to connect…" />
+        <button id="dbxConnectBtn">Connect</button>
+      </div>
+      <p class="dbx-path" style="margin-top:8px;">
+        Need a token? Open
+        <a href="https://www.dropbox.com/developers/apps" target="_blank" rel="noopener">dropbox.com/developers/apps</a>,
+        create an app (scoped, full Dropbox), then generate an access token under
+        <em>Settings → Generated access token</em>.
+        Logs will be saved to <code>/PitchLogs/</code> in your Dropbox.
+      </p>
+    </div>
+
+    <div id="dbxConnectedArea" style="display:none;">
+      <div class="controls">
+        <button id="dbxSaveBtn" class="primary" disabled>⬆ Save log to Dropbox</button>
+        <button id="dbxDisconnectBtn">Disconnect</button>
+      </div>
+      <p class="dbx-path" id="dbxLastSaved"></p>
     </div>
   </div>
 
@@ -336,6 +387,154 @@ function settleCandidate(n, pitch, clarity) {
 startBtn.addEventListener("click", start);
 stopBtn.addEventListener("click", stop);
 window.addEventListener("beforeunload", () => { if (stream) stream.getTracks().forEach(t => t.stop()); });
+
+// ── Dropbox integration ──────────────────────────────────────────────────────
+
+const DBX_FOLDER   = '/PitchLogs';
+const DBX_TOKEN_KEY = 'pitchTrainer_dbxToken';
+
+const dbxToken        = $("dbxToken");
+const dbxConnectBtn   = $("dbxConnectBtn");
+const dbxSetupArea    = $("dbxSetupArea");
+const dbxConnectedArea= $("dbxConnectedArea");
+const dbxBadge        = $("dbxBadge");
+const dbxAccountName  = $("dbxAccountName");
+const dbxSaveBtn      = $("dbxSaveBtn");
+const dbxDisconnectBtn= $("dbxDisconnectBtn");
+const dbxLastSaved    = $("dbxLastSaved");
+
+async function dbxCall(token, endpoint, body) {
+  const res = await fetch(`https://api.dropboxapi.com/2/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error_summary || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function dbxUpload(token, path, text) {
+  const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Dropbox-API-Arg': JSON.stringify({
+        path,
+        mode: 'add',
+        autorename: true,
+        mute: false
+      }),
+      'Content-Type': 'application/octet-stream'
+    },
+    body: new TextEncoder().encode(text)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error_summary || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+function dbxSetConnected(token, name) {
+  dbxSetupArea.style.display    = 'none';
+  dbxConnectedArea.style.display = '';
+  dbxBadge.textContent = 'connected';
+  dbxBadge.className   = 'badge ok';
+  dbxAccountName.textContent = name ? `(${name})` : '';
+  dbxSaveBtn.disabled = (eventCount === 0);
+}
+
+function dbxSetDisconnected() {
+  dbxSetupArea.style.display     = '';
+  dbxConnectedArea.style.display = 'none';
+  dbxBadge.textContent = 'disconnected';
+  dbxBadge.className   = 'badge off';
+  dbxAccountName.textContent = '';
+  dbxLastSaved.textContent   = '';
+  localStorage.removeItem(DBX_TOKEN_KEY);
+}
+
+async function dbxConnect(token) {
+  dbxConnectBtn.disabled = true;
+  dbxConnectBtn.textContent = 'Connecting…';
+  try {
+    const info = await dbxCall(token, 'users/get_current_account', null);
+    localStorage.setItem(DBX_TOKEN_KEY, token);
+    dbxSetConnected(token, info.name?.display_name ?? '');
+  } catch (e) {
+    errBox.textContent = 'Dropbox: ' + e.message;
+  } finally {
+    dbxConnectBtn.disabled = false;
+    dbxConnectBtn.textContent = 'Connect';
+  }
+}
+
+dbxConnectBtn.addEventListener('click', () => {
+  const t = dbxToken.value.trim();
+  if (!t) return;
+  dbxConnect(t);
+});
+
+dbxToken.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') dbxConnectBtn.click();
+});
+
+dbxDisconnectBtn.addEventListener('click', dbxSetDisconnected);
+
+dbxSaveBtn.addEventListener('click', async () => {
+  const token = localStorage.getItem(DBX_TOKEN_KEY);
+  if (!token) return;
+
+  const text = logEl.innerText;
+  if (!text.trim()) { errBox.textContent = 'Dropbox: log is empty.'; return; }
+
+  const now = new Date();
+  const stamp = now.toISOString().replace(/[:.]/g, '-').replace('T','_').slice(0,19);
+  const filename = `pitch-session_${stamp}.txt`;
+  const path = `${DBX_FOLDER}/${filename}`;
+
+  dbxSaveBtn.disabled = true;
+  dbxSaveBtn.textContent = '⬆ Saving…';
+  try {
+    const result = await dbxUpload(token, path, text);
+    const savedPath = result.path_display ?? path;
+    dbxLastSaved.innerHTML = `Saved: <code>${savedPath}</code>`;
+    logLine('marker', `── saved to Dropbox: ${savedPath} ──`);
+  } catch (e) {
+    errBox.textContent = 'Dropbox save failed: ' + e.message;
+  } finally {
+    dbxSaveBtn.disabled = false;
+    dbxSaveBtn.textContent = '⬆ Save log to Dropbox';
+  }
+});
+
+// Sync "Save" button enabled state whenever the log changes
+function dbxSyncSaveBtn() {
+  if (localStorage.getItem(DBX_TOKEN_KEY)) {
+    dbxSaveBtn.disabled = (eventCount === 0);
+  }
+}
+
+// Observe log DOM mutations to keep button in sync without patching logLine
+new MutationObserver(dbxSyncSaveBtn).observe(logEl, { childList: true });
+
+// Restore session from stored token on load
+(async () => {
+  const saved = localStorage.getItem(DBX_TOKEN_KEY);
+  if (!saved) return;
+  try {
+    const info = await dbxCall(saved, 'users/get_current_account', null);
+    dbxSetConnected(saved, info.name?.display_name ?? '');
+  } catch {
+    localStorage.removeItem(DBX_TOKEN_KEY); // token expired or invalid
+  }
+})();
 </script>
 </body>
 </html>
