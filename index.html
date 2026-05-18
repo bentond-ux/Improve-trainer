@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Phase 0 — Pitch Capture</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --line: #2a313c;
+    --text: #e6edf3;
+    --dim: #8b949e;
+    --accent: #4ec9b0;
+    --bad: #e06c75;
+    --good: #98c379;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 16px;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { color: var(--dim); margin: 0 0 16px; font-size: 13px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    background: #21262d;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #04130f; border-color: var(--accent); font-weight: 700; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .readout { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  .note {
+    font-size: 64px;
+    font-weight: 700;
+    line-height: 1;
+    min-width: 130px;
+    color: var(--accent);
+  }
+  .note.idle { color: var(--dim); }
+  .meta { color: var(--dim); font-size: 13px; }
+  .meta b { color: var(--text); font-weight: 600; }
+
+  .centsbar {
+    position: relative;
+    height: 10px;
+    background: #21262d;
+    border-radius: 5px;
+    margin: 14px 0 4px;
+    overflow: hidden;
+  }
+  .centsbar .mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--dim); }
+  .centsbar .dot {
+    position: absolute; top: -3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); transform: translateX(-50%); transition: left .05s linear, background .1s;
+  }
+  .centslabels { display: flex; justify-content: space-between; color: var(--dim); font-size: 11px; }
+
+  label.field { display: block; margin: 10px 0; color: var(--dim); font-size: 13px; }
+  input[type=range] { width: 100%; }
+  .row { display:flex; gap: 16px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 200px; }
+
+  .tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .tags button { padding: 6px 10px; font-size: 12px; }
+  #condition {
+    width: 100%; background:#21262d; color:var(--text);
+    border:1px solid var(--line); border-radius:8px; padding:8px; font:inherit;
+  }
+
+  #log {
+    height: 320px; overflow-y: auto; background: #0b0e13;
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+    font-size: 13px; white-space: pre-wrap;
+  }
+  #log .marker { color: var(--accent); }
+  #log .t { color: var(--dim); }
+  .loghead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .stat { color: var(--dim); font-size: 12px; }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+  <h1>Phase 0 — Pitch Capture</h1>
+  <p class="sub">Captures mic audio, runs pitch detection (pitchy / McLeod), logs detected notes with timestamps. Test your guitar in real conditions, then write the honest assessment.</p>
+
+  <div class="card">
+    <div class="controls">
+      <button id="startBtn" class="primary">▶ Start mic</button>
+      <button id="stopBtn" disabled>■ Stop</button>
+      <span id="status" class="stat">idle</span>
+    </div>
+    <div id="errBox" class="err" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <div class="readout">
+      <div id="noteEl" class="note idle">—</div>
+      <div class="meta">
+        <div>freq <b id="freqEl">—</b> Hz</div>
+        <div>clarity <b id="clarityEl">—</b></div>
+        <div>level <b id="levelEl">—</b> dB</div>
+      </div>
+    </div>
+    <div class="centsbar"><div class="mid"></div><div id="centsDot" class="dot" style="left:50%"></div></div>
+    <div class="centslabels"><span>-50¢</span><span id="centsTxt">0¢</span><span>+50¢</span></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label class="field">
+        Clarity threshold: <b id="clarThVal">0.90</b>
+        <input id="clarTh" type="range" min="0.50" max="0.99" step="0.01" value="0.90" />
+        <span style="font-size:11px;">Lower = logs more (noisy room), higher = stricter (clean tone).</span>
+      </label>
+      <label class="field">
+        Noise gate: <b id="gateVal">-45</b> dB
+        <input id="gate" type="range" min="-70" max="-20" step="1" value="-45" />
+        <span style="font-size:11px;">Ignore signal quieter than this (rejects silence/hum).</span>
+      </label>
+    </div>
+    <label class="field" style="margin-bottom:4px;">Condition note (stamped into log):</label>
+    <input id="condition" placeholder="e.g. clean tone, quiet room" />
+    <div class="tags" id="tagRow">
+      <button data-c="clean tone, quiet room">clean / quiet</button>
+      <button data-c="light overdrive, quiet room">overdrive / quiet</button>
+      <button data-c="clean tone, TV on">clean / TV on</button>
+      <button data-c="backing track through speakers">over backing track</button>
+      <button data-c="bends test">bends</button>
+      <button data-c="hammer-ons / pull-offs test">hammer-ons</button>
+      <button data-c="fast run test">fast run</button>
+      <button data-c="low E / A string test">low strings</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="loghead">
+      <span class="stat" id="logStat">0 events</span>
+      <div class="controls">
+        <button id="mark">⎘ Insert marker</button>
+        <button id="copyLog">Copy log</button>
+        <button id="clearLog">Clear</button>
+      </div>
+    </div>
+    <div id="log"></div>
+  </div>
+
+<script type="module">
+import { PitchDetector } from "https://esm.sh/pitchy@4";
+
+const $ = (id) => document.getElementById(id);
+const startBtn = $("startBtn"), stopBtn = $("stopBtn"), statusEl = $("status"), errBox = $("errBox");
+const noteEl = $("noteEl"), freqEl = $("freqEl"), clarityEl = $("clarityEl"), levelEl = $("levelEl");
+const centsDot = $("centsDot"), centsTxt = $("centsTxt");
+const clarTh = $("clarTh"), clarThVal = $("clarThVal"), gate = $("gate"), gateVal = $("gateVal");
+const conditionEl = $("condition"), logEl = $("log"), logStat = $("logStat");
+
+const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+function freqToNote(freq) {
+  const midi = 69 + 12 * Math.log2(freq / 440);
+  const rounded = Math.round(midi);
+  const cents = Math.round((midi - rounded) * 100);
+  const name = NOTE_NAMES[((rounded % 12) + 12) % 12];
+  const octave = Math.floor(rounded / 12) - 1;
+  return { name: name + octave, cents, midi: rounded };
+}
+
+let audioCtx = null, stream = null, analyser = null, rafId = null;
+let detector = null, inputBuf = null;
+let running = false, startTime = 0;
+let eventCount = 0;
+let lastLoggedMidi = null, candidateMidi = null, candidateSince = 0;
+const HOLD_MS = 60; // a note must persist this long before it's logged
+
+clarTh.addEventListener("input", () => clarThVal.textContent = (+clarTh.value).toFixed(2));
+gate.addEventListener("input", () => gateVal.textContent = gate.value);
+$("tagRow").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-c]");
+  if (b) { conditionEl.value = b.dataset.c; logLine("marker", `── condition: ${b.dataset.c} ──`); }
+});
+$("mark").addEventListener("click", () => {
+  const c = conditionEl.value.trim();
+  logLine("marker", `── marker${c ? ": " + c : ""} ──`);
+});
+$("clearLog").addEventListener("click", () => { logEl.innerHTML = ""; eventCount = 0; updateLogStat(); });
+$("copyLog").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(logEl.innerText); $("copyLog").textContent = "Copied ✓";
+    setTimeout(() => $("copyLog").textContent = "Copy log", 1200); }
+  catch { alert("Clipboard blocked — select the log text manually."); }
+});
+
+function ts() {
+  const s = (performance.now() - startTime) / 1000;
+  const m = Math.floor(s / 60), r = (s % 60).toFixed(2).padStart(5, "0");
+  return `${String(m).padStart(2,"0")}:${r}`;
+}
+function updateLogStat() { logStat.textContent = `${eventCount} event${eventCount===1?"":"s"}`; }
+function logLine(kind, text) {
+  const div = document.createElement("div");
+  if (kind === "marker") {
+    div.innerHTML = `<span class="t">[${running?ts():"--:--"}]</span> <span class="marker">${text}</span>`;
+  } else {
+    div.innerHTML = `<span class="t">[${ts()}]</span> ${text}`;
+    eventCount++;
+  }
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  updateLogStat();
+}
+
+async function start() {
+  errBox.textContent = "";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  } catch (e) {
+    errBox.textContent = "Mic access failed: " + e.message + " (needs https:// or localhost)";
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  src.connect(analyser);
+
+  detector = PitchDetector.forFloat32Array(analyser.fftSize);
+  detector.minVolumeDecibels = -100; // we apply our own gate below
+  inputBuf = new Float32Array(detector.inputLength);
+
+  running = true;
+  startTime = performance.now();
+  lastLoggedMidi = null; candidateMidi = null;
+  startBtn.disabled = true; stopBtn.disabled = false;
+  statusEl.textContent = `listening @ ${audioCtx.sampleRate} Hz`;
+  logLine("marker", `── session start (sr ${audioCtx.sampleRate} Hz) ──`);
+  loop();
+}
+
+function stop() {
+  running = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  audioCtx = stream = analyser = null;
+  startBtn.disabled = false; stopBtn.disabled = true;
+  statusEl.textContent = "stopped";
+  noteEl.textContent = "—"; noteEl.classList.add("idle");
+  freqEl.textContent = clarityEl.textContent = levelEl.textContent = "—";
+  logLine("marker", "── session stop ──");
+}
+
+function rms(buf) {
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+  return Math.sqrt(s / buf.length);
+}
+
+function loop() {
+  if (!running) return;
+  rafId = requestAnimationFrame(loop);
+  analyser.getFloatTimeDomainData(inputBuf);
+
+  const level = rms(inputBuf);
+  const db = level > 0 ? 20 * Math.log10(level) : -Infinity;
+  levelEl.textContent = isFinite(db) ? db.toFixed(0) : "—";
+
+  const gateDb = +gate.value;
+  if (!isFinite(db) || db < gateDb) {
+    noteEl.classList.add("idle");
+    clarityEl.textContent = "—";
+    settleCandidate(null);
+    return;
+  }
+
+  const [pitch, clarity] = detector.findPitch(inputBuf, audioCtx.sampleRate);
+  clarityEl.textContent = clarity.toFixed(2);
+
+  if (clarity < +clarTh.value || pitch < 60 || pitch > 1600) {
+    noteEl.classList.add("idle");
+    settleCandidate(null);
+    return;
+  }
+
+  const n = freqToNote(pitch);
+  noteEl.textContent = n.name;
+  noteEl.classList.remove("idle");
+  freqEl.textContent = pitch.toFixed(1);
+  const clamped = Math.max(-50, Math.min(50, n.cents));
+  centsDot.style.left = (50 + clamped) + "%";
+  centsDot.style.background = Math.abs(n.cents) <= 8 ? "var(--good)" :
+    Math.abs(n.cents) <= 20 ? "var(--accent)" : "var(--bad)";
+  centsTxt.textContent = (n.cents > 0 ? "+" : "") + n.cents + "¢";
+
+  settleCandidate(n, pitch, clarity);
+}
+
+// Debounce: only log a note once it has been held HOLD_MS and differs from the last logged note.
+function settleCandidate(n, pitch, clarity) {
+  const now = performance.now();
+  if (!n) { candidateMidi = null; return; }
+  if (n.midi !== candidateMidi) {
+    candidateMidi = n.midi;
+    candidateSince = now;
+    return;
+  }
+  if (candidateMidi !== lastLoggedMidi && (now - candidateSince) >= HOLD_MS) {
+    lastLoggedMidi = candidateMidi;
+    logLine("note",
+      `<b>${n.name}</b>  ${pitch.toFixed(1)} Hz  ${(n.cents>0?"+":"")}${n.cents}¢  clarity ${clarity.toFixed(2)}`);
+  }
+}
+
+startBtn.addEventListener("click", start);
+stopBtn.addEventListener("click", stop);
+window.addEventListener("beforeunload", () => { if (stream) stream.getTracks().forEach(t => t.stop()); });
+</script>
+</body>
+</html>
