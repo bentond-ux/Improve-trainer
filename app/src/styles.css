@@ -42,3 +42,23 @@ td:first-child { color:var(--dim); }
   border-bottom:1px solid var(--line); }
 .warn { color:#d29922; font-size:12px; margin-top:8px; }
 .err { color:var(--zappa); font-size:13px; margin-top:8px; }
+
+.tabs { display:flex; gap:8px; margin:0 0 14px; }
+.tab { background:transparent; border:1px solid var(--line); }
+.tab.active { background:var(--accent); color:#04130f; border-color:var(--accent); font-weight:700; }
+.sel { background:#21262d; color:var(--text); border:1px solid var(--line);
+  border-radius:8px; padding:8px; font:inherit; }
+.tag-g { color:var(--garcia); font-size:12px; }
+.tag-z { color:var(--zappa); font-size:12px; }
+.ckrow { display:flex; justify-content:space-between; padding:5px 0;
+  border-bottom:1px solid var(--line); font-size:13px; }
+.ckrow .ok { color:var(--garcia); }
+.ckrow .no { color:var(--zappa); }
+.hist-h { display:block; color:var(--dim); font-size:12px;
+  text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px; }
+.pcbar { display:flex; align-items:center; gap:8px; font-size:12px;
+  color:var(--dim); padding:2px 0; }
+.pcbar > span:first-child { width:28px; }
+.pcbar > span:last-child { width:38px; text-align:right; }
+.pctrack { flex:1; height:8px; background:#21262d; border-radius:4px; overflow:hidden; }
+.pctrack > div { height:100%; background:var(--accent); }
